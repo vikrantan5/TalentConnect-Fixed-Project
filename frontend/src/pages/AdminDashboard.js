@@ -800,13 +800,15 @@ const AdminDashboard = () => {
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Payer</th>
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Payee</th>
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Task</th>
-                      <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Status</th>
+                         <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Owner Approval</th>
+                      <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Escrow Status</th>
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                                   <tbody>
                     {escrowPayments.map((payment) => {
                       const isPendingRelease = payment.escrow_status === 'PENDING_RELEASE';
+                         const ownerApprovalStatus = payment.owner_approval_status || 'pending';
                       return (
                       <tr 
                         key={payment.id} 

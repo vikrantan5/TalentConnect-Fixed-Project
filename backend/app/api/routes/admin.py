@@ -496,19 +496,42 @@ async def get_escrow_payments(current_admin_id: str = Depends(get_current_admin_
         users_result = db.table('users').select('id, username, email, full_name').in_('id', user_ids).execute()
         users_dict = {user['id']: user for user in (users_result.data or [])}
         
-        # Get task details
+        # Get task details with creator info
         task_ids = list(set([p['task_id'] for p in payments_result.data if p.get('task_id')]))
-        tasks_result = db.table('tasks').select('id, title, status').in_('id', task_ids).execute()
+        tasks_result = db.table('tasks').select('id, title, status, creator_id, acceptor_id, payment_status').in_('id', task_ids).execute()
         tasks_dict = {task['id']: task for task in (tasks_result.data or [])}
+        
+        # Get task submissions to check if work was submitted
+        submissions_result = db.table('task_submissions').select('task_id, is_approved, reviewed_at').in_('task_id', task_ids).execute()
+        submissions_dict = {}
+        for sub in (submissions_result.data or []):
+            submissions_dict[sub['task_id']] = sub
         
         # Combine payment data with user and task details
         escrow_payments = []
         for payment in payments_result.data:
+            task = tasks_dict.get(payment['task_id'])
+            submission = submissions_dict.get(payment['task_id'])
+            
+            # Determine owner approval status
+            owner_approval_status = 'pending'
+            if task:
+                if task['status'] == 'completed':
+                    owner_approval_status = 'approved'
+                elif task['status'] == 'cancelled':
+                    owner_approval_status = 'rejected'
+                elif task['status'] == 'submitted':
+                    owner_approval_status = 'awaiting_review'
+                elif task['status'] in ['open', 'accepted', 'in_progress']:
+                    owner_approval_status = 'work_in_progress'
+            
             escrow_payments.append({
                 **payment,
                 'payer': users_dict.get(payment['payer_id']),
                 'payee': users_dict.get(payment['payee_id']),
-                'task': tasks_dict.get(payment['task_id'])
+                'task': task,
+                'submission': submission,
+                'owner_approval_status': owner_approval_status
             })
         
         return escrow_payments
