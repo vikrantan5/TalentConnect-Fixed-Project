@@ -57,13 +57,14 @@ class PaymentService:
         """
         Hold payment in escrow (TEST mode - just update database status)
         In production, this would use Razorpay's authorization hold
+        escrow_status = NULL means payment is ESCROWED (held, not released/refunded)
         """
         try:
             db = get_db()
             
-            # Update payment record to ESCROW_HELD
+            # Update payment record - NULL = ESCROWED (held in escrow)
             result = db.table('payments').update({
-                'escrow_status': 'ESCROW_HELD',
+                'escrow_status': None,  # NULL = ESCROWED
                 'payment_mode': 'TEST',
                 'escrowed_at': utc_now_iso()
             }).eq('id', payment_id).execute()
@@ -71,7 +72,7 @@ class PaymentService:
             logger.info(f"[TEST MODE] Payment {payment_id} held in escrow for task {task_id}, amount: ₹{amount}")
             return {
                 "status": "success",
-                "escrow_status": "ESCROW_HELD",
+                "escrow_status": "ESCROWED",  # Return friendly status to caller
                 "payment_mode": "TEST"
             }
         except Exception as e:
@@ -86,10 +87,10 @@ class PaymentService:
         try:
             db = get_db()
             
-            # In TEST mode, just update database status
+            # Both TEST and LIVE modes use 'RELEASED' status
             if self.payment_mode == "TEST":
                 result = db.table('payments').update({
-                    'escrow_status': 'RELEASED_TEST',
+                    'escrow_status': 'RELEASED',  # DB constraint allows 'RELEASED'
                     'status': 'released',
                     'released_at': utc_now_iso()
                 }).eq('id', payment_id).execute()
@@ -102,7 +103,7 @@ class PaymentService:
                 self.client.payment.capture(razorpay_payment_id, amount_paise)
                 
                 result = db.table('payments').update({
-                    'escrow_status': 'RELEASED',
+                    'escrow_status': 'RELEASED',  # DB constraint allows 'RELEASED'
                     'status': 'released',
                     'released_at': utc_now_iso()
                 }).eq('id', payment_id).execute()
@@ -122,10 +123,10 @@ class PaymentService:
         try:
             db = get_db()
             
-            # In TEST mode, just update database status
+            # Both TEST and LIVE modes use 'REFUNDED' status
             if self.payment_mode == "TEST":
                 result = db.table('payments').update({
-                    'escrow_status': 'REFUNDED_TEST',
+                    'escrow_status': 'REFUNDED',  # DB constraint allows 'REFUNDED'
                     'status': 'refunded',
                     'refunded_at': utc_now_iso(),
                     'refund_reason': reason
@@ -143,7 +144,7 @@ class PaymentService:
                     self.client.payment.refund(razorpay_payment_id, refund_data)
                 
                 result = db.table('payments').update({
-                    'escrow_status': 'REFUNDED',
+                    'escrow_status': 'REFUNDED',  # DB constraint allows 'REFUNDED'
                     'status': 'refunded',
                     'refunded_at': utc_now_iso(),
                     'refund_reason': reason

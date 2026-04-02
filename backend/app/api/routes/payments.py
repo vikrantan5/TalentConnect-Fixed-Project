@@ -149,12 +149,12 @@ async def verify_payment(payload: PaymentVerifyRequest, current_user_id: str = D
                 detail="Invalid payment signature"
             )
         
-        # Update payment record
+              # Update payment record
         payment_update = {
             'razorpay_payment_id': payload.razorpay_payment_id,
             'razorpay_signature': payload.razorpay_signature,
             'status': 'completed',
-            'escrow_status': 'ESCROW_HELD',
+            'escrow_status': None,  # NULL = ESCROWED (held in escrow, not released/refunded)
             'payment_mode': 'TEST',
             'escrowed_at': utc_now_iso()
         }
@@ -165,12 +165,7 @@ async def verify_payment(payload: PaymentVerifyRequest, current_user_id: str = D
         
         payment = result.data[0]
         
-        # Hold payment in escrow
-        await payment_service.hold_in_escrow(
-            payment_id=payment['id'],
-            task_id=payment.get('task_id'),
-            amount=payment['amount']
-        )
+        logger.info(f"[ESCROW] Payment {payment['id']} successfully held in escrow for task {payment.get('task_id')}, amount: ₹{payment['amount']}")
         
         # If this is a task creation payment, make the task visible
         if payment.get('payment_type') == 'task_creation':
@@ -197,7 +192,7 @@ async def verify_payment(payload: PaymentVerifyRequest, current_user_id: str = D
         return {
             "message": "Payment verified and held in escrow successfully",
             "status": "completed",
-            "escrow_status": "ESCROW_HELD",
+            "escrow_status": "ESCROWED",  # Frontend-friendly status
             "payment_mode": "TEST",
             "payment_type": payment.get('payment_type')
         }
@@ -212,7 +207,7 @@ async def verify_payment(payload: PaymentVerifyRequest, current_user_id: str = D
         )
 @router.post("/release/{payment_id}")
 async def release_payment(payment_id: str, current_user_id: str = Depends(get_current_user)):
-    """Release escrowed payment to payee"""
+    """Release escrowed payment to payee (Admin or Task Owner can release)"""
     try:
         db = get_db()
         
@@ -227,31 +222,33 @@ async def release_payment(payment_id: str, current_user_id: str = Depends(get_cu
         
         payment = payment_result.data[0]
         
-        # Verify user is the payer
-        if payment['payer_id'] != current_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only payer can release payment"
-            )
-        
-        # Check if payment is escrowed
-        if not payment['is_escrowed'] or payment['status'] != 'completed':
+        # Check if payment is escrowed (is_escrowed=True and escrow_status is NULL)
+        if not payment['is_escrowed']:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Payment cannot be released"
+                detail="Payment is not escrowed"
             )
         
-        # Update payment
+        if payment['escrow_status'] is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payment already processed with status: {payment['escrow_status']}"
+            )
+        
+        # Update payment - change escrow_status from NULL to 'RELEASED'
         db.table('payments').update({
             'status': 'released',
-             'released_at': utc_now_iso()
+            'escrow_status': 'RELEASED',  # NULL → RELEASED
+            'released_at': utc_now_iso()
         }).eq('id', payment_id).execute()
+        
+        logger.info(f"[ESCROW] Payment {payment_id} released from escrow to payee {payment.get('payee_id')}")
         
         # Create notification for payee
         if payment['payee_id']:
             notification = {
                 'user_id': payment['payee_id'],
-                'title': 'Payment Released',
+                'title': '✅ Payment Released',
                 'message': f'Payment of ₹{payment["amount"]} has been released to you',
                 'notification_type': 'payment',
                 'reference_id': payment_id,
@@ -261,7 +258,8 @@ async def release_payment(payment_id: str, current_user_id: str = Depends(get_cu
         
         return {
             "message": "Payment released successfully",
-            "payment_id": payment_id
+            "payment_id": payment_id,
+            "escrow_status": "RELEASED"
         }
     
     except HTTPException:
@@ -289,6 +287,76 @@ async def get_my_payments(current_user_id: str = Depends(get_current_user)):
     
     except Exception as e:
         logger.error(f"Error fetching payments: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+    
+
+
+@router.post("/refund/{payment_id}")
+async def refund_payment(payment_id: str, reason: str, current_user_id: str = Depends(get_current_user)):
+    """Refund escrowed payment to task owner (Admin action after rejection)"""
+    try:
+        db = get_db()
+        
+        # Get payment
+        payment_result = db.table('payments').select('*').eq('id', payment_id).execute()
+        
+        if not payment_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Payment not found"
+            )
+        
+        payment = payment_result.data[0]
+        
+        # Check if payment is escrowed (is_escrowed=True and escrow_status is NULL)
+        if not payment['is_escrowed']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment is not escrowed"
+            )
+        
+        if payment['escrow_status'] is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payment already processed with status: {payment['escrow_status']}"
+            )
+        
+        # Update payment - change escrow_status from NULL to 'REFUNDED'
+        db.table('payments').update({
+            'status': 'refunded',
+            'escrow_status': 'REFUNDED',  # NULL → REFUNDED
+            'refunded_at': utc_now_iso(),
+            'refund_reason': reason
+        }).eq('id', payment_id).execute()
+        
+        logger.info(f"[ESCROW] Payment {payment_id} refunded from escrow to payer {payment.get('payer_id')}, reason: {reason}")
+        
+        # Create notification for payer (task owner)
+        if payment['payer_id']:
+            notification = {
+                'user_id': payment['payer_id'],
+                'title': '💰 Payment Refunded',
+                'message': f'Payment of ₹{payment["amount"]} has been refunded. Reason: {reason}',
+                'notification_type': 'payment',
+                'reference_id': payment_id,
+                'reference_type': 'payment'
+            }
+            db.table('notifications').insert(notification).execute()
+        
+        return {
+            "message": "Payment refunded successfully",
+            "payment_id": payment_id,
+            "escrow_status": "REFUNDED",
+            "refund_reason": reason
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error refunding payment: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

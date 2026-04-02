@@ -229,7 +229,7 @@ const AdminDashboard = () => {
       id: 'escrow', 
       label: 'Escrow Payments', 
       icon: Lock,
-      badge: escrowPayments.filter(p => p.escrow_status === 'PENDING_RELEASE').length
+       badge: escrowPayments.filter(p => p.escrow_status === null && p.is_escrowed === true).length
     },
     { id: 'refunds', label: 'Refunds', icon: ArrowDownRight },
     { id: 'reports', label: 'Reports', icon: Flag },
@@ -806,14 +806,22 @@ const AdminDashboard = () => {
                     </tr>
                   </thead>
                                   <tbody>
-                    {escrowPayments.map((payment) => {
-                      const isPendingRelease = payment.escrow_status === 'PENDING_RELEASE';
-                         const ownerApprovalStatus = payment.owner_approval_status || 'pending';
+                                      {escrowPayments.map((payment) => {
+                      // NULL escrow_status = ESCROWED (held in escrow, awaiting action)
+                      const isEscrowed = payment.escrow_status === null && payment.is_escrowed === true;
+                      const isPendingRelease = payment.status === 'pending_release';
+                      const ownerApprovalStatus = payment.owner_approval_status || 'pending';
+                      
+                      // Display-friendly status
+                      const displayStatus = payment.escrow_status === null 
+                        ? 'ESCROWED' 
+                        : payment.escrow_status;
+                      
                       return (
                       <tr 
                         key={payment.id} 
                         className={`border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors ${
-                          isPendingRelease ? 'bg-yellow-500/10 animate-pulse-slow' : ''
+                          isEscrowed ? 'bg-yellow-500/10 animate-pulse-slow' : ''
                         }`}
                       >
                         <td className="py-5 px-6">
@@ -833,23 +841,25 @@ const AdminDashboard = () => {
                         <td className="py-5 px-6">
                           <div className="text-slate-400 text-sm font-semibold">{payment.task?.title || 'N/A'}</div>
                         </td>
-                        <td className="py-5 px-6">
+                                            <td className="py-5 px-6">
                           <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${
-                            payment.escrow_status === 'PENDING_RELEASE'
+                            isEscrowed && isPendingRelease
                               ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 animate-pulse'
-                              : payment.escrow_status === 'ESCROW_HELD'
+                              : isEscrowed
                               ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                               : payment.escrow_status === 'RELEASED'
                               ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : payment.escrow_status === 'REFUNDED'
+                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
                               : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
                           }`}>
-                            {isPendingRelease && <Bell className="w-3 h-3 animate-bounce" />}
-                            {payment.escrow_status}
+                            {isEscrowed && isPendingRelease && <Bell className="w-3 h-3 animate-bounce" />}
+                            {displayStatus}
                           </span>
                         </td>
                         <td className="py-5 px-6">
                           <div className="flex items-center gap-2">
-                            {(payment.escrow_status === 'ESCROW_HELD' || payment.escrow_status === 'PENDING_RELEASE') && (
+                            {isEscrowed && (
                               <>
                                 <button
                                   onClick={() => handleForceRelease(payment.id)}

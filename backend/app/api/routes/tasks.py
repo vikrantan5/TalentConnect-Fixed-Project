@@ -1008,17 +1008,19 @@ async def approve_task_submission(
         # Handle payment and wallet transactions
         payment_result = db.table('payments').select('*').eq('task_id', task_id).eq('status', 'completed').eq('is_escrowed', True).order('created_at', desc=True).limit(1).execute()
         
-        # Update escrow status to PENDING_RELEASE and notify admins
+        # Update escrow status to NULL (awaiting admin release) and notify admins
         if payment_result.data:
             payment = payment_result.data[0]
             
             # Ensure payee_id is set (in case it wasn't set during payment creation)
             payee_id = payment.get('payee_id') or task.get('acceptor_id') or task.get('assigned_user_id')
             
-            # Update payment escrow status to show it's ready for admin release
+            # Update payment - keep escrow_status as NULL (still escrowed, awaiting admin action)
+            # Admin will change it to 'RELEASED' or 'REFUNDED' later
             db.table('payments').update({
-                'escrow_status': 'PENDING_RELEASE',
+                'status': 'pending_release',  # Status changed to indicate it's awaiting release
                 'payee_id': payee_id  # Ensure payee_id is set
+                # escrow_status remains NULL (still in escrow)
             }).eq('id', payment['id']).execute()
             
             # Get all admin users
