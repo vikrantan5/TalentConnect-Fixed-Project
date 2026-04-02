@@ -97,10 +97,13 @@ async def create_payment_order(payment_data: PaymentCreate, current_user_id: str
         )
         
         # Create payment record
+        # Get payee from either acceptor_id or assigned_user_id
+        payee_id = task.get('acceptor_id') or task.get('assigned_user_id')
+        
         new_payment = {
             'task_id': str(payment_data.task_id),
             'payer_id': current_user_id,
-            'payee_id': task.get('acceptor_id'),  # Will be None for creation payment
+            'payee_id': payee_id,  # Will be None for creation payment
             'amount': payment_data.amount,
             'currency': payment_data.currency,
             'razorpay_order_id': order['id'],
@@ -108,7 +111,6 @@ async def create_payment_order(payment_data: PaymentCreate, current_user_id: str
             'is_escrowed': True,
             'payment_type': 'task_creation' if is_creation_payment else 'task_completion'
         }
-        
         payment_result = db.table('payments').insert(new_payment).execute()
         
         return {

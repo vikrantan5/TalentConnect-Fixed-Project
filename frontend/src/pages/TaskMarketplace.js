@@ -135,13 +135,26 @@ const TaskMarketplace = () => {
       let processedTasks = [];
       if (Array.isArray(data)) {
         processedTasks = data.map(item => {
-          // If item has 'task' property, extract and merge with creator info
+          // If item has 'task' property, extract and merge with user info
           if (item.task) {
+            // For my-tasks, the acceptor is the one working on the task
+            const userName = activeTab === 'my-tasks' 
+              ? (item.acceptor?.full_name || item.acceptor?.username)
+              : (item.creator?.full_name || item.creator?.username);
+            
+            const userPhoto = activeTab === 'my-tasks'
+              ? item.acceptor?.profile_photo
+              : item.creator?.profile_photo;
+            
+            const userRating = activeTab === 'my-tasks'
+              ? item.acceptor?.average_rating
+              : item.creator?.average_rating;
+            
             return {
               ...item.task,
-              creator_name: item.creator?.full_name || item.creator?.username,
-              creator_photo: item.creator?.profile_photo,
-              creator_rating: item.creator?.average_rating
+              creator_name: userName,
+              creator_photo: userPhoto,
+              creator_rating: userRating
             };
           }
           // Otherwise it's already a flat task object

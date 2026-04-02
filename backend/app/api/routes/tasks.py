@@ -148,13 +148,37 @@ async def get_all_tasks(status: str = "open", current_user_id: str = Depends(get
 
 @router.get("/my-tasks")
 async def get_my_tasks(current_user_id: str = Depends(get_current_user)):
-    """Get tasks created by current user"""
+    """Get tasks created by current user with acceptor details"""
     try:
         db = get_db()
         
         tasks_result = db.table('tasks').select('*').eq('creator_id', current_user_id).order('created_at', desc=True).execute()
         
-        return tasks_result.data if tasks_result.data else []
+        if not tasks_result.data:
+            return []
+        
+        # Get acceptor/assigned user details for tasks that have been accepted
+        user_ids = list(set([
+            task.get('acceptor_id') or task.get('assigned_user_id') 
+            for task in tasks_result.data 
+            if task.get('acceptor_id') or task.get('assigned_user_id')
+        ]))
+        
+        acceptors_dict = {}
+        if user_ids:
+            users_result = db.table('users').select('id, username, full_name, profile_photo').in_('id', user_ids).execute()
+            acceptors_dict = {user['id']: user for user in (users_result.data or [])}
+        
+        # Format response with acceptor details
+        results = []
+        for task in tasks_result.data:
+            acceptor_id = task.get('acceptor_id') or task.get('assigned_user_id')
+            results.append({
+                'task': task,
+                'acceptor': acceptors_dict.get(acceptor_id) if acceptor_id else None
+            })
+        
+        return results
     
     except Exception as e:
         logger.error(f"Error fetching my tasks: {str(e)}")
@@ -973,7 +997,7 @@ async def approve_task_submission(
         # Update task status
         db.table('tasks').update({
             'status': 'completed', 
-             'payment_status': 'pending_admin_release'
+             'payment_status': 'payment_pending'
         }).eq('id', task_id).execute()
         
         # Update acceptor's total_tasks_completed
@@ -988,13 +1012,24 @@ async def approve_task_submission(
         if payment_result.data:
             payment = payment_result.data[0]
             
+            # Ensure payee_id is set (in case it wasn't set during payment creation)
+            payee_id = payment.get('payee_id') or task.get('acceptor_id') or task.get('assigned_user_id')
+            
             # Update payment escrow status to show it's ready for admin release
             db.table('payments').update({
-                 'escrow_status': 'PENDING_RELEASE'
+                'escrow_status': 'PENDING_RELEASE',
+                'payee_id': payee_id  # Ensure payee_id is set
             }).eq('id', payment['id']).execute()
             
             # Get all admin users
             admins_result = db.table('users').select('id, username').eq('role', 'admin').execute()
+            
+            # Get payee username for notification
+            payee_username = 'acceptor'
+            if payee_id:
+                payee_result = db.table('users').select('username').eq('id', payee_id).limit(1).execute()
+                if payee_result.data:
+                    payee_username = payee_result.data[0]['username']
             
             # Notify all admins about the task approval
             if admins_result.data:
@@ -1002,7 +1037,7 @@ async def approve_task_submission(
                     admin_notification = {
                         'user_id': admin['id'],
                         'title': '🔔 Payment Release Requested',
-                        'message': f'Task "{task["title"]}" has been approved by the task owner. Please review and release payment of ₹{task["price"]} to {task.get("acceptor_id", "acceptor")}.',
+                        'message': f'Task "{task["title"]}" has been approved by the task owner. Please review and release payment of ₹{task["price"]} to {payee_username}.',
                         'notification_type': 'admin_action_required',
                         'reference_id': payment['id'],
                         'reference_type': 'payment',
@@ -1011,7 +1046,6 @@ async def approve_task_submission(
                     db.table('notifications').insert(admin_notification).execute()
                 
                 logger.info(f"Sent payment release notification to {len(admins_result.data)} admin(s) for task {task_id}")
-        
 
         
         # Create notification for acceptor
