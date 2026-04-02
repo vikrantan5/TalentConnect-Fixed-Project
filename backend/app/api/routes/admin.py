@@ -650,9 +650,7 @@ async def admin_release_payment(payment_id: str, current_admin_id: str = Depends
         # Update payment status
         db.table('payments').update({
             'status': 'released',
-            'escrow_status': 'RELEASED',
-            'released_at': datetime.now(timezone.utc).isoformat(),
-            'released_by_admin': current_admin_id
+             'escrow_status': 'RELEASED'
         }).eq('id', payment_id).execute()
         
         # Update task payment status

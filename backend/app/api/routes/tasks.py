@@ -973,8 +973,7 @@ async def approve_task_submission(
         # Update task status
         db.table('tasks').update({
             'status': 'completed', 
-            'payment_status': 'pending_admin_release',
-            'approved_at': utc_now_iso()
+             'payment_status': 'pending_admin_release'
         }).eq('id', task_id).execute()
         
         # Update acceptor's total_tasks_completed
@@ -991,8 +990,7 @@ async def approve_task_submission(
             
             # Update payment escrow status to show it's ready for admin release
             db.table('payments').update({
-                'escrow_status': 'PENDING_RELEASE',
-                'task_approved_at': utc_now_iso()
+                 'escrow_status': 'PENDING_RELEASE'
             }).eq('id', payment['id']).execute()
             
             # Get all admin users
@@ -1014,52 +1012,13 @@ async def approve_task_submission(
                 
                 logger.info(f"Sent payment release notification to {len(admins_result.data)} admin(s) for task {task_id}")
         
-        payment_result = db.table('payments').select('*').eq('task_id', task_id).eq('status', 'completed').eq('is_escrowed', True).order('created_at', desc=True).limit(1).execute()
-        if payment_result.data:
-            payment = payment_result.data[0]
-            
-            # Release payment
-            db.table('payments').update({
-                'status': 'released',
-                'released_at': utc_now_iso()
-            }).eq('id', payment['id']).execute()
-            
-            # ATOMIC WALLET TRANSFER: Creator → Acceptor
-            try:
-                from app.services.wallet_service import wallet_service
-                
-                transfer_result = wallet_service.atomic_transfer(
-                    from_user_id=current_user_id,
-                    to_user_id=task['acceptor_id'],
-                    amount=float(task['price']),
-                    reason=f'Task payment: {task["title"]}',
-                    reference_id=task_id,
-                    reference_type='task'
-                )
-                
-                logger.info(f"Wallet transfer successful: ₹{task['price']} from {current_user_id} to {task['acceptor_id']}")
-                   # Log activity for both users
-                activity_service.log_task_completed(
-                    acceptor_id=task['acceptor_id'],
-                    creator_id=current_user_id,
-                    task_id=task_id,
-                    task_title=task['title'],
-                    amount=float(task['price'])
-                )
-                
-                
-            except Exception as wallet_error:
-                logger.error(f"Wallet transfer failed: {str(wallet_error)}")
-                # Don't fail the approval, just log the error
-                # In production, you'd want to handle this more carefully
-        else:
-            logger.warning(f"No completed payment found for task {task_id}, skipping wallet transfer")
+
         
         # Create notification for acceptor
         notification = {
             'user_id': task['acceptor_id'],
-            'title': 'Task Approved & Payment Released!',
-            'message': f'Your submission for "{task["title"]}" has been approved! ₹{task["price"]} has been credited.',
+            'title': 'Task Approved!',
+            'message': f'Your submission for "{task["title"]}" has been approved! Payment of ₹{task["price"]} is being processed by admin.',
             'notification_type': 'task_update',
             'reference_id': task_id,
             'reference_type': 'task'
@@ -1067,10 +1026,11 @@ async def approve_task_submission(
         db.table('notifications').insert(notification).execute()
         
         return {
-            "message": "Task approved, payment released, and wallet updated",
+            "message": "Task approved successfully. Payment is pending admin release.",
             "task_id": task_id,
-            "amount_paid": task['price'],
-            "review_notes": review_notes
+            "amount": task['price'],
+            "review_notes": review_notes,
+            "status": "Payment pending admin approval"
         }
     
     except HTTPException:
