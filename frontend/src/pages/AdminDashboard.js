@@ -800,28 +800,50 @@ const AdminDashboard = () => {
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Payer</th>
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Payee</th>
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Task</th>
-                         <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Owner Approval</th>
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Escrow Status</th>
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
-                                  <tbody>
-                                      {escrowPayments.map((payment) => {
+                  <tbody>
+                    {escrowPayments.map((payment) => {
                       // NULL escrow_status = ESCROWED (held in escrow, awaiting action)
                       const isEscrowed = payment.escrow_status === null && payment.is_escrowed === true;
                       const isPendingRelease = payment.status === 'pending_release';
-                      const ownerApprovalStatus = payment.owner_approval_status || 'pending';
+                      const ownerApprovalStatus = payment.task_owner_approval || payment.owner_approval_status || 'pending';
                       
                       // Display-friendly status
                       const displayStatus = payment.escrow_status === null 
-                        ? 'ESCROWED' 
+                        ? 'ESCROW_HELD' 
                         : payment.escrow_status;
+                      
+                      // Determine if buttons should be enabled
+                      const canRelease = isEscrowed && ownerApprovalStatus === 'ACCEPTED';
+                      const canRefund = isEscrowed && ownerApprovalStatus === 'REJECTED';
+                      
+                      // Get payee name - show task acceptor if payee exists
+                      const payeeName = payment.payee?.full_name || payment.payee?.username || 'Not Assigned';
+                      
+                      // Determine action status message
+                      let actionMessage = '';
+                      if (ownerApprovalStatus === 'ACCEPTED') {
+                        actionMessage = 'Task owner approved – Admin can release payment';
+                      } else if (ownerApprovalStatus === 'REJECTED') {
+                        actionMessage = 'Task owner rejected – Admin can issue refund';
+                      } else if (ownerApprovalStatus === 'awaiting_review') {
+                        actionMessage = 'Awaiting task submission';
+                      } else if (payment.escrow_status === 'RELEASED') {
+                        actionMessage = 'Payment released successfully';
+                      } else if (payment.escrow_status === 'REFUNDED') {
+                        actionMessage = 'Payment refunded';
+                      } else {
+                        actionMessage = 'Awaiting task submission';
+                      }
                       
                       return (
                       <tr 
                         key={payment.id} 
                         className={`border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors ${
-                          isEscrowed ? 'bg-yellow-500/10 animate-pulse-slow' : ''
+                          isEscrowed && (canRelease || canRefund) ? 'bg-yellow-500/10 animate-pulse-slow' : ''
                         }`}
                       >
                         <td className="py-5 px-6">
@@ -833,54 +855,73 @@ const AdminDashboard = () => {
                           <div className="text-white font-bold text-lg">₹{payment.amount}</div>
                         </td>
                         <td className="py-5 px-6">
-                          <div className="text-slate-300 font-semibold">{payment.payer?.username || 'N/A'}</div>
+                          <div className="text-slate-300 font-semibold">{payment.payer?.full_name || payment.payer?.username || 'N/A'}</div>
                         </td>
                         <td className="py-5 px-6">
-                          <div className="text-slate-300 font-semibold">{payment.payee?.username || 'N/A'}</div>
+                          <div className="text-slate-300 font-semibold">{payeeName}</div>
                         </td>
                         <td className="py-5 px-6">
                           <div className="text-slate-400 text-sm font-semibold">{payment.task?.title || 'N/A'}</div>
                         </td>
-                                            <td className="py-5 px-6">
-                          <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${
-                            isEscrowed && isPendingRelease
-                              ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 animate-pulse'
-                              : isEscrowed
-                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                              : payment.escrow_status === 'RELEASED'
-                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                              : payment.escrow_status === 'REFUNDED'
-                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                              : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                          }`}>
-                            {isEscrowed && isPendingRelease && <Bell className="w-3 h-3 animate-bounce" />}
-                            {displayStatus}
-                          </span>
-                        </td>
                         <td className="py-5 px-6">
-                          <div className="flex items-center gap-2">
-                            {isEscrowed && (
-                              <>
-                                <button
-                                  onClick={() => handleForceRelease(payment.id)}
-                                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
-                                    isPendingRelease
-                                      ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40 shadow-lg shadow-emerald-500/20'
-                                      : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/20'
-                                  }`}
-                                >
-                                  <Unlock className="w-4 h-4" />
-                                  {isPendingRelease ? 'Release Now' : 'Release'}
-                                </button>
-                                <button
-                                  onClick={() => handleForceRefund(payment.id)}
-                                  className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-xl text-sm font-bold transition-all border border-orange-500/20"
-                                >
-                                  <ArrowDownRight className="w-4 h-4" />
-                                  Refund
-                                </button>
-                              </>
-                            )}
+                          <div className="space-y-2">
+                            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${
+                              isEscrowed && (canRelease || canRefund)
+                                ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 animate-pulse'
+                                : isEscrowed
+                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                : payment.escrow_status === 'RELEASED'
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : payment.escrow_status === 'REFUNDED'
+                                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                            }`}>
+                              {isEscrowed && (canRelease || canRefund) && <Bell className="w-3 h-3 animate-bounce" />}
+                              {displayStatus}
+                            </span>
+                          </div>
+                        </td>
+                                             <td className="py-5 px-6">
+                          <div className="space-y-2">
+                            {/* Action Status Message */}
+                            <div className="text-xs text-slate-400 font-semibold mb-2">
+                              {actionMessage}
+                            </div>
+                            
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-2">
+                              {isEscrowed ? (
+                                <>
+                                  {canRelease && (
+                                    <button
+                                      onClick={() => handleForceRelease(payment.id)}
+                                      className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-sm font-bold transition-all shadow-lg shadow-emerald-500/20 hover:scale-105"
+                                      data-testid="release-payment-button"
+                                    >
+                                      <Unlock className="w-4 h-4" />
+                                      Release Payment
+                                    </button>
+                                  )}
+                                  {canRefund && (
+                                    <button
+                                      onClick={() => handleForceRefund(payment.id)}
+                                      className="flex items-center gap-2 px-4 py-2 bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border border-orange-500/40 rounded-xl text-sm font-bold transition-all shadow-lg shadow-orange-500/20 hover:scale-105"
+                                      data-testid="refund-payment-button"
+                                    >
+                                      <ArrowDownRight className="w-4 h-4" />
+                                      Refund Payment
+                                    </button>
+                                  )}
+                                  {!canRelease && !canRefund && (
+                                    <span className="text-xs text-slate-500 font-semibold italic">Awaiting task owner action</span>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-xs text-slate-500 font-semibold italic">
+                                  {payment.escrow_status === 'RELEASED' ? '✓ Completed' : payment.escrow_status === 'REFUNDED' ? '✓ Refunded' : 'No actions available'}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </td>
                       </tr>

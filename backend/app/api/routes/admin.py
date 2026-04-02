@@ -490,16 +490,29 @@ async def get_escrow_payments(current_admin_id: str = Depends(get_current_admin_
         if not payments_result.data:
             return []
         
-        # Get user details for payers and payees
-        user_ids = list(set([p['payer_id'] for p in payments_result.data if p.get('payer_id')] + 
-                           [p['payee_id'] for p in payments_result.data if p.get('payee_id')]))
-        users_result = db.table('users').select('id, username, email, full_name').in_('id', user_ids).execute()
-        users_dict = {user['id']: user for user in (users_result.data or [])}
-        
-        # Get task details with creator info
+        # Get task details first to find all user IDs (including acceptors)
         task_ids = list(set([p['task_id'] for p in payments_result.data if p.get('task_id')]))
-        tasks_result = db.table('tasks').select('id, title, status, creator_id, acceptor_id, payment_status').in_('id', task_ids).execute()
+        tasks_result = db.table('tasks').select('id, title, status, creator_id, acceptor_id, assigned_user_id, payment_status').in_('id', task_ids).execute()
         tasks_dict = {task['id']: task for task in (tasks_result.data or [])}
+        
+        # Collect all user IDs (payers, payees, and task acceptors)
+        user_ids = set()
+        for p in payments_result.data:
+            if p.get('payer_id'):
+                user_ids.add(p['payer_id'])
+            if p.get('payee_id'):
+                user_ids.add(p['payee_id'])
+            # Also get acceptor from task
+            task = tasks_dict.get(p['task_id'])
+            if task:
+                if task.get('acceptor_id'):
+                    user_ids.add(task['acceptor_id'])
+                if task.get('assigned_user_id'):
+                    user_ids.add(task['assigned_user_id'])
+        
+        # Fetch all user details
+        users_result = db.table('users').select('id, username, email, full_name').in_('id', list(user_ids)).execute()
+        users_dict = {user['id']: user for user in (users_result.data or [])}
         
         # Get task submissions to check if work was submitted
         submissions_result = db.table('task_submissions').select('task_id, is_approved, reviewed_at').in_('task_id', task_ids).execute()
@@ -513,13 +526,26 @@ async def get_escrow_payments(current_admin_id: str = Depends(get_current_admin_
             task = tasks_dict.get(payment['task_id'])
             submission = submissions_dict.get(payment['task_id'])
             
+            # Get payer details
+            payer_user = users_dict.get(payment['payer_id'])
+            
+            # Get payee details - if payee_id is set, use it; otherwise get from task acceptor
+            payee_user = None
+            if payment.get('payee_id'):
+                payee_user = users_dict.get(payment['payee_id'])
+            elif task:
+                # Get acceptor from task
+                acceptor_id = task.get('acceptor_id') or task.get('assigned_user_id')
+                if acceptor_id:
+                    payee_user = users_dict.get(acceptor_id)
+            
             # Determine owner approval status
             owner_approval_status = 'pending'
             if task:
                 if task['status'] == 'completed':
-                    owner_approval_status = 'approved'
+                    owner_approval_status = 'ACCEPTED'
                 elif task['status'] == 'cancelled':
-                    owner_approval_status = 'rejected'
+                    owner_approval_status = 'REJECTED'
                 elif task['status'] == 'submitted':
                     owner_approval_status = 'awaiting_review'
                 elif task['status'] in ['open', 'accepted', 'in_progress']:
@@ -527,11 +553,12 @@ async def get_escrow_payments(current_admin_id: str = Depends(get_current_admin_
             
             escrow_payments.append({
                 **payment,
-                'payer': users_dict.get(payment['payer_id']),
-                'payee': users_dict.get(payment['payee_id']),
+                'payer': payer_user,
+                'payee': payee_user,
                 'task': task,
                 'submission': submission,
-                'owner_approval_status': owner_approval_status
+                'owner_approval_status': owner_approval_status,
+                'task_owner_approval': owner_approval_status  # For frontend compatibility
             })
         
         return escrow_payments
@@ -666,14 +693,35 @@ async def admin_release_payment(payment_id: str, current_admin_id: str = Depends
         
         payment = payment_result.data[0]
         
+        # Validate escrow state
+        if not payment.get('is_escrowed'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment is not in escrow"
+            )
+        
+        if payment.get('escrow_status') not in [None, 'ESCROW_HELD']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payment cannot be released. Current status: {payment.get('escrow_status')}"
+            )
+        
         # Get task details
         task_result = db.table('tasks').select('*').eq('id', payment['task_id']).execute()
         task = task_result.data[0] if task_result.data else None
         
+        # Validate task is approved/completed
+        if task and task['status'] != 'completed':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Task must be completed before releasing payment"
+            )
+        
         # Update payment status
         db.table('payments').update({
             'status': 'released',
-             'escrow_status': 'RELEASED'
+            'escrow_status': 'RELEASED',
+            'released_at': datetime.now(timezone.utc).isoformat()
         }).eq('id', payment_id).execute()
         
         # Update task payment status
@@ -760,11 +808,32 @@ async def admin_refund_payment(payment_id: str, reason: str = "Admin refund", cu
         
         payment = payment_result.data[0]
         
+        # Validate escrow state
+        if not payment.get('is_escrowed'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment is not in escrow"
+            )
+        
+        if payment.get('escrow_status') not in [None, 'ESCROW_HELD']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payment cannot be refunded. Current status: {payment.get('escrow_status')}"
+            )
+        
+        # Validate reason is provided
+        if not reason or reason.strip() == "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Refund reason is required"
+            )
+        
         # Update payment status
         db.table('payments').update({
             'status': 'refunded',
             'escrow_status': 'REFUNDED',
-            'refunded_at': datetime.now(timezone.utc).isoformat()
+            'refunded_at': datetime.now(timezone.utc).isoformat(),
+            'refund_reason': reason
         }).eq('id', payment_id).execute()
         
         # Notify payer
