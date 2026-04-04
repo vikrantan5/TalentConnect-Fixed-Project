@@ -804,21 +804,24 @@ const AdminDashboard = () => {
                       <th className="text-left py-5 px-6 text-xs font-bold text-purple-400 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
-                  <tbody>
+                                    <tbody>
                     {escrowPayments.map((payment) => {
                       // NULL escrow_status = ESCROWED (held in escrow, awaiting action)
-                      const isEscrowed = payment.escrow_status === null && payment.is_escrowed === true;
-                      const isPendingRelease = payment.status === 'pending_release';
-                      const ownerApprovalStatus = payment.task_owner_approval || payment.owner_approval_status || 'pending';
-                      
-                      // Display-friendly status
+                      // Display-friendly status first
                       const displayStatus = payment.escrow_status === null 
                         ? 'ESCROW_HELD' 
                         : payment.escrow_status;
                       
-                      // Determine if buttons should be enabled
-                      const canRelease = isEscrowed && ownerApprovalStatus === 'ACCEPTED';
-                      const canRefund = isEscrowed && ownerApprovalStatus === 'REJECTED';
+                      // Check if payment is in escrow (either null or explicitly ESCROW_HELD)
+                      const isEscrowed = (payment.escrow_status === null && payment.is_escrowed === true) || 
+                                       (displayStatus === 'ESCROW_HELD');
+                      
+                      const isPendingRelease = payment.status === 'pending_release';
+                      const ownerApprovalStatus = payment.task_owner_approval || payment.owner_approval_status || 'pending';
+                      
+                      // Determine if buttons should be enabled - check against displayStatus
+                      const canRelease = displayStatus === 'ESCROW_HELD' && ownerApprovalStatus === 'ACCEPTED';
+                      const canRefund = displayStatus === 'ESCROW_HELD' && ownerApprovalStatus === 'REJECTED';
                       
                       // Get payee name - show task acceptor if payee exists
                       const payeeName = payment.payee?.full_name || payment.payee?.username || 'Not Assigned';
@@ -890,7 +893,8 @@ const AdminDashboard = () => {
                             
                             {/* Action Buttons */}
                             <div className="flex items-center gap-2">
-                              {isEscrowed ? (
+                                {/* Show buttons when escrow_status is ESCROW_HELD */}
+                              {displayStatus === 'ESCROW_HELD' ? (
                                 <>
                                   {canRelease && (
                                     <button
@@ -902,14 +906,14 @@ const AdminDashboard = () => {
                                       Release Payment
                                     </button>
                                   )}
-                                  {canRefund && (
+                                   {canRefund && (
                                     <button
                                       onClick={() => handleForceRefund(payment.id)}
-                                      className="flex items-center gap-2 px-4 py-2 bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border border-orange-500/40 rounded-xl text-sm font-bold transition-all shadow-lg shadow-orange-500/20 hover:scale-105"
+                                      className="flex items-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 rounded-xl text-sm font-bold transition-all shadow-lg shadow-red-500/20 hover:scale-105"
                                       data-testid="refund-payment-button"
                                     >
                                       <ArrowDownRight className="w-4 h-4" />
-                                      Refund Payment
+                                      Refund
                                     </button>
                                   )}
                                   {!canRelease && !canRefund && (

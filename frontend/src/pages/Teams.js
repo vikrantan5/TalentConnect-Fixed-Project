@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
+
 import { 
   Users, 
   Linkedin, 
@@ -19,10 +20,10 @@ const Teams = () => {
   const teamMembers = [
     {
       id: 1,
-      name: 'JAVERIYA',
-      role: 'Team Member',
+      name: 'Javeriya Anjum',
+      role: 'Developer Of TalentConnect',
       bio: 'Passionate about technology and innovation. Dedicated to creating amazing experiences and building great products.',
-      image: 'https://via.placeholder.com/400x400/6366f1/ffffff?text=JAVERIYA',
+      image: '../../assets/javeriya.jpeg',
       socials: {
         linkedin: 'https://linkedin.com',
         twitter: 'https://twitter.com',
