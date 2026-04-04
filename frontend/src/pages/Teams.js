@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
+import javeriyaImg from '../assets/javeriya.jpeg';
 
 import { 
   Users, 
@@ -23,7 +24,7 @@ const Teams = () => {
       name: 'Javeriya Anjum',
       role: 'Developer Of TalentConnect',
       bio: 'Passionate about technology and innovation. Dedicated to creating amazing experiences and building great products.',
-      image: '../../assets/javeriya.jpeg',
+      image: javeriyaImg,
       socials: {
         linkedin: 'https://linkedin.com',
         twitter: 'https://twitter.com',
@@ -35,10 +36,10 @@ const Teams = () => {
     },
     {
       id: 2,
-      name: '[Your Name Here]',
-      role: 'Team Member',
-      bio: 'Add your bio here. Share your passion, expertise, and what drives you to make a difference.',
-      image: 'https://via.placeholder.com/400x400/8b5cf6/ffffff?text=Add+Photo',
+      name: 'Mr. Karthik P',
+      role: 'Guide Of TalentConnect',
+      bio: 'Assistant Professor Dept. of Computer Science',
+      image: "'https://via.placeholder.com/400x400/8b5cf6/ffffff?text=Add+Photo'",
       socials: {
         linkedin: 'https://linkedin.com',
         twitter: 'https://twitter.com',
@@ -49,7 +50,7 @@ const Teams = () => {
       badgeGradient: 'from-cyan-600 to-indigo-600'
     }
   ];
-
+console.log(teamMembers[0].image);
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800">
       <Navbar />
